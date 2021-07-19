@@ -1,0 +1,3 @@
+^./mksysb
+^./_tmp.*
+^./home/.*/patch

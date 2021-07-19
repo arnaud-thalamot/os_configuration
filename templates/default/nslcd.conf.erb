@@ -1,0 +1,11 @@
+base o=ccs,c=com
+binddn cn=ccs,cn=Clients,o=ccs,c=com
+bindpw O2Source
+tls_cacertfile /etc/ssl/certs/serverkey_ldap.pem
+TLS_CACERTDIR /etc/ssl/certs
+ssl no
+uri ldap://ldap1 ldap://ldap2
+ldap_version 3
+timelimit 120
+bind_timelimit 120
+idle_timelimit 3600

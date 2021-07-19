@@ -1,0 +1,48 @@
+[domain/default]
+autofs_provider = ldap
+sudo_provider = ldap
+krb5_realm = #
+ldap_search_base = o=ccs,c=com
+id_provider = ldap
+auth_provider = ldap
+chpass_provider = ldap
+ldap_uri = ldap://ldap1
+ldap_default_bind_dn = cn=ccs,cn=Clients,o=ccs,c=com
+ldap_default_authtok_type = password
+ldap_default_authtok = O2Source
+ldap_id_use_start_tls = False
+cache_credentials = True
+#ldap_tls_cacertdir = /etc/openldap/cacerts
+#ldap_tls_cacertdir = /usr/ldap/etc
+#ldap_tls_cacert = /usr/ldap/etc/clientkey.crl
+#ldap_tls_reqcert = never
+ldap_auth_disable_tls_never_use_in_production = true
+ldap_sudo_search_base = cn=SUDOers,o=ccs,c=com
+#automountMapName = auto.master
+enumerate = True
+krb5_store_password_if_offline = True
+
+[sssd]
+services = nss, pam, autofs, sudo
+config_file_version = 2
+domains = default
+
+[nss]
+homedir_substring = /home
+allowed_shells = /bin/bash
+shell_fallback = /bin/bash
+
+[pam]
+
+[sudo]
+base = o=ccs,c=com
+binddn = cn=ccssudo,cn=Clients,o=ccs,c=com
+bindpw = Ks3mFl45
+
+[autofs]
+
+[ssh]
+
+[pac]
+
+[ifp]

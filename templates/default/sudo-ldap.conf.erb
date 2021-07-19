@@ -1,0 +1,10 @@
+sudoers_debug 1
+base o=ccs,c=com
+binddn cn=ccssudo,cn=Clients,o=ccs,c=com
+bindpw Ks3mFl45
+uri ldap://ldap1 ldap://ldap2
+ldap_version 3
+timelimit 120
+bind_timelimit 120
+idle_timelimit 3600
+sudoers_base cn=SUDOers,o=ccs,c=com

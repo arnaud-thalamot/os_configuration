@@ -1,0 +1,22 @@
+[main]
+cachedir=<%= @CacheDir %>
+keepcache=<%= @KeepCache %>
+debuglevel=<%= @DebugLevel %>
+logfile=<%= @LogFile %>
+distroverpkg=<%= @DistroverPkg %>
+tolerant=<%= @Tolerant %>
+exactarch=<%= @ExactArch %>
+obsoletes=<%= @Obsoletes %>
+gpgcheck=<%= @GpgCheck %>
+plugins=<%= @Plugins %>
+exclude=<%= @Exclude %>
+tsflags=<%= @TsFlags %>
+
+# Note: yum-RHN-plugin doesn't honor this.
+metadata_expire=<%= @Metadata_Expire %>
+
+# Default.
+# installonly_limit = 3
+
+# PUT YOUR REPOS HERE OR IN separate files named file.repo
+# in /etc/yum.repos.d

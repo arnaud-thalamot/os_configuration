@@ -1,0 +1,466 @@
+#!/bin/ksh
+#@(#)===========================================================================
+#@(#) Name              : APP_LIB_production.lib
+#@(#) Project           :       general library
+#@(#)
+#@(#) Creation date     :       03/04/2006
+#@(#) Author            :       Jean Philippe BOCQUENET
+#@(#) Object            :       general library for batchs and development
+#@(#) Parameter(s)      : (none)
+#@(#)
+#@(#) Output            : (file, tables, return code, ...)
+#@(#) Return Code       : 0 : succes
+#@(#)                     1 : job in error
+#@(#)===========================================================================
+#@(#) Functions list
+#@(#)---------------------------------------------------------------------------
+#@(#)
+#@(#) ecrit_log
+#@(#) ecrit_log_and_mail
+#@(#) affiche_erreur
+#@(#) GetDate
+#@(#) convert_to_second
+#@(#) convert_to_heure
+#@(#) change_heure
+#@(#) lt_blank
+#@(#) to_upper
+#@(#) to_lower
+#@(#)
+#@(#)===========================================================================
+#@(#) History
+#@(#)---------------------------------------------------------------------------
+#@(#)
+#@(#) 2010/06/01 - L LE SQUER
+#@(#) Revue du script pour prendre en compte les variables LOGFILE ou CMALOGFIC
+#@(#) Si CMALOGFIC est définie dans le Lanceur, LOGFILE prend la valeur de CMALOGFIC
+#@(#) Si elle est inexistante, LOGFILE prend la valeur du nom du Lanceur avec 
+#@(#) l'extension .log.
+#@(#) 
+#@(#) 2010/06/02 - L LE SQUER
+#@(#) Revue des variables qui alimentent le fichier Log en prendant en compte 
+#@(#) les normes de TWS 8.4
+#@(#) 
+#@(#)===========================================================================
+#set -x
+typeset LIB_NAME="APP_LIB_production.lib"
+typeset LIB_VERS="[${_LIB_NAME}] [1.2]"
+
+#===============================================================================
+# External Variables
+#===============================================================================
+# users directories
+
+if [ "${USER}" = "" ] && [ "${LOGNAME}" != "" ];
+then
+    export PROD="/production/home/${LOGNAME%adm*}"
+elif [ "${USER}" != "" ] && [ "${LOGNAME}" = "" ];
+then
+    export PROD="/production/home/${USER%adm*}"
+elif [ "${USER}" != "" ] && [ "${LOGNAME}" != "" ];
+then
+    export PROD="/production/home/${USER%adm*}"
+else
+    echo "Dans APP_LIB_production.lib :"
+    echo "Les variables USER et LOGNAME sont vides. Veuillez les initialiser dans le .profile de l'utilisateur"
+    exit 1
+fi
+
+# Chemins des batchs
+export CMAEXEDIR="${PROD}/sh"
+export CMALIBDIR="/production/lib"
+export CMALOGDIR="${PROD}/log"
+export CMATMPDIR="${PROD}/tmp"
+export CMADATDIR="${PROD}/data"
+
+export TMPFILE=`basename ${0%.*}`".tmp"
+export LOGFILE=`basename ${0%.*}`".log"
+
+# Chemins du produit TWS
+# export TWSPATH="/opt/tws"
+# export TWSEXEDIR="${TWSPATH}/bin"
+
+
+#===============================================================================
+# Assignation des variables pour Post message Tivoli ou Log
+# Les variables UNISON_ sont specifiques a TWS
+#===============================================================================
+
+if [ "${UNISON_CPU}" = "" ];
+then
+  UNISON_CPU=`uname -n | tr a-z A-Z`
+  UNISON_SCHED="MAN_REQ_MANUAL"
+  UNISON_JOB="${UNISON_CPU}#${UNISON_SCHED}.C_MAN_CCSX_XX_SH_MAN-LAUNCH_00000"
+  UNISON_JOBNUM=$(date '+%M%S')
+fi
+
+export JOUR=`date +%d`
+export MOIS=`date +%m`
+export ANNEE=`date +%y`                     
+export HEURE=`date +%H:%M:%S`
+export SERVEUR="${UNISON_CPU}"
+export APPLICATION="`echo ${UNISON_JOB#*.} | awk '{print substr ($1,3,3)}'`"
+export ELEMENT="`echo ${UNISON_SCHED} | awk '{print substr ($1,9,8)}'`"
+export PID=$$
+export TERMINAL="not_a_tty"
+export UTILISATEUR=`whoami`
+export COMPONENT_NAME="${UNISON_SCHED}.${UNISON_JOB#*.}"
+export POST="1"                 # Defini dans le programme (par defaut : 1)
+export GRAVITE="CRITICAL"       # Defini dans le programme (par defaut : CRITICAL)
+export DOMAINE="`echo ${UNISON_JOB#*.} | awk '{print substr ($1,15,2)}'`"
+export ERREUR="${UNISON_JOBNUM}"
+export VALEUR="KO"              # Defini dans le programme (par defaut : KO)
+export MESSAGE="Error"          # Defini dans le programme (par defaut : Error)
+
+
+# Variable utiliser pour la fonction d'envoi de mail
+
+export BIN_MAIL=/usr/bin/mail
+export LIST_DEST=""
+
+#===============================================================================
+# Internal Variables
+#===============================================================================
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS
+# ------------------------------------------------------------------------------
+
+#@(#)===========================================================================
+#@(#) Fonction  : ecrit_log
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : Ecrit le message dans une log formattee pour la supervision
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = VALEUR (OK, KO, etc)
+#@(#)                    $2 = MESSAGE (Contenu du message d'erreur)
+#@(#)                    $3 = POST (Flag de remontee d'alerte Tivoli : 0 NON, 1 OUI)
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: ecrit_log "KO" "MESSAGE A LOGGER" "1"
+#@(#)---------------------------------------------------------------------------
+
+function ecrit_log
+{
+
+if [ -n "$CMALOGFIC" ]
+then
+    export LOGFILE=$CMALOGFIC
+    printf "==> Monitored Log : ${CMALOGDIR}/${LOGFILE} <==\n"
+fi
+
+VALEUR="$1"
+MESSAGE="$2"
+POST="$3"
+JOUR=`date +%d`
+MOIS=`date +%m`
+ANNEE=`date +%y`
+HEURE=`date +%H:%M:%S`
+
+# Ecriture dans la log
+echo "${ANNEE}\t${MOIS}\t${JOUR}\t${HEURE}\t${SERVEUR}\t${APPLICATION}\t${ELEMENT}\t${PID}\t${TERMINAL}\t${UTILISATEUR}\t${COMPONENT_NAME}\t${POST}\t${GRAVITE}\t${DOMAINE}\t${ERREUR}\t${VALEUR}\t${MESSAGE}" >> ${CMALOGDIR}/${LOGFILE}
+
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : ecrit_log_and_mail
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : Ecrit le message dans une log formattee pour la supervision
+#@(#)               et envoi un mail d'alerte
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = VALEUR (OK, KO, etc)
+#@(#)                    $2 = MESSAGE (Contenu du message d'erreur)
+#@(#)                    $3 = POST (Flag de remontee d'alerte Tivoli : 0 NON, 1 OUI)
+#@(#)                    $4 = LIST_DEST (Liste des adresses de destination)
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: ecrit_log_and_mail "KO" "MESSAGE A LOGGER" "1" "ho.it_sta@cma-cgm.com"
+#@(#)---------------------------------------------------------------------------
+
+function ecrit_log_and_mail
+{
+
+if [ -n "$CMALOGFIC" ]
+then
+    export LOGFILE=$CMALOGFIC
+    printf "==> Monitored Log : ${CMALOGDIR}/${LOGFILE} <==\n"
+fi
+
+VALEUR="$1"
+MESSAGE="$2"
+POST="$3"
+LIST_DEST="${LIST_DEST} $4"
+JOUR=`date +%d`
+MOIS=`date +%m`
+ANNEE=`date +%y`
+HEURE=`date +%H:%M:%S`
+
+# Ecriture dans la log
+echo "${ANNEE}\t${MOIS}\t${JOUR}\t${HEURE}\t${SERVEUR}\t${APPLICATION}\t${ELEMENT}\t${PID}\t${TERMINAL}\t${UTILISATEUR}\t${COMPONENT_NAME}\t${POST}\t${GRAVITE}\t${DOMAINE}\t${ERREUR}\t${VALEUR}\t${MESSAGE}" >> ${CMALOGDIR}/${LOGFILE}
+if [ ${POST} -eq 1 ];
+then
+    TRI_APP=`echo ${APPLICATION} | tr '[:lower:]' '[:upper:]' | awk '{print substr($1, 1, 3)}'`
+    TRI_COMP=`echo ${COMPONENT_NAME} | tr '[:lower:]' '[:upper:]' |awk '{print substr($1, 1, 3)}'`
+    ENTETE="[${TRI_APP}] [${TRI_COMP}] Error"
+    {
+      print "Date (dd/mm/yyyy hh:mi:ss): ${JOUR}/${MOIS}/${ANNEE} ${HEURE}"
+      print "Server: ${SERVEUR}"
+      print "Application: ${APPLICATION}"
+      print "Element: ${ELEMENT}"
+      print "PID: ${PID}"
+      print "Terminal: ${TERMINAL}"
+      print "User: ${UTILISATEUR}"
+      print "Component: ${COMPONENT_NAME}"
+      print "Post: ${POST}"
+      print "Level: ${GRAVITE}"
+      print "Domaine: ${DOMAINE}"
+      print "Error: ${ERREUR}"
+      print "Value: ${VALEUR}"
+      print "Message: ${MESSAGE}"
+    }| ${BIN_MAIL} -s "${ENTETE}" "${LIST_DEST}"
+fi
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : affiche_erreur
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : Ecrit le message d'erreur a l'ecran
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = VALEUR (OK, KO, etc)
+#@(#)                    $2 = MESSAGE (Contenu du message d'erreur)
+#@(#)                    $3 = POST (Flag de remontee d'alerte Tivoli : 0 NON, 1 OUI)
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: affiche_erreur "KO" "MESSAGE A LOGGER" "1"
+#@(#)---------------------------------------------------------------------------
+
+function affiche_erreur
+{
+VALEUR="$1"
+MESSAGE="$2"
+POST="$3"
+JOUR=`date +%d`
+MOIS=`date +%m`
+ANNEE=`date +%y`
+HEURE=`date +%H:%M:%S`
+
+echo ""
+echo "=============================================================================================================================="
+echo ""
+echo "${ANNEE}\t${MOIS}\t${JOUR}\t${HEURE}\t${SERVEUR}\t${APPLICATION}\t${ELEMENT}\t${PID}\t${TERMINAL}\t${UTILISATEUR}\t${COMPONENT_NAME}\t${POST}\t${GRAVITE}\t${DOMAINE}\t${ERREUR}\t${VALEUR}\t${MESSAGE}"
+echo ""
+echo "=============================================================================================================================="
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : GetDate
+#@(#) Auteur    : Ludovic LE SQUER
+#@(#) Descriptif        : Conversion de la date avec sortie formattee
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = nDays (Nombre de jours a recalculer)
+#@(#)                    $2 = format (Format de la date en sortie)
+#@(#)           Sortie : date formattée
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: export new_date=$(GetDate -1 '+%Y.%m.%d')
+#@(#)---------------------------------------------------------------------------
+
+function GetDate
+{
+typeset -i nDays=$1; format=$2
+eval $(echo $TZ | sed 's!\([^-0-9]*\)\([-0-9]*\)\(.*\)!typeset -i localOffset=\2;zon1=\1;zon2=\3!')
+TZ=$zon1$((localOffset-24*nDays))$zon2 date $format
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : convert_to_second
+#@(#) Auteur    : Lionel SEVERIAN
+#@(#) Descriptif        : permet de convertir une heure et des minutes en seconde
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = HOUR (Champ des heures)
+#@(#)                    $2 = MINUTE (Champ des minutes)
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: convert_to_second 03 45
+#@(#)---------------------------------------------------------------------------
+
+function convert_to_second
+{
+  HOUR=$1
+  MINUTE=$2
+  if [ "$HOUR" != "" ] && [ "$MINUTE" != "" ];
+  then
+      let HOUR=HOUR*3600
+      let MINUTE=MINUTE*60
+      let SECOND=HOUR+MINUTE
+      echo $SECOND
+      return
+  fi
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : convert_to_heure
+#@(#) Auteur    : Lionel SEVERIAN
+#@(#) Descriptif        : permet de convertir des secondes en heure minutes secondes
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = MINUTE (Valeur en minutes)
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: convert_to_heure 36000
+#@(#)---------------------------------------------------------------------------
+
+function convert_to_heure
+{
+a=$1
+
+second=1
+minute=60*second
+heure=60*minute
+jour=24*heure
+mois=30*jour
+annee=365*jour
+
+let annees=a/annee
+let rest=a-annees*annee
+let moiss=rest/mois
+let rest=rest-mois*moiss
+let jours=rest/jour
+let rest=rest-jour*jours
+let heures=rest/heure
+let rest=rest-heure*heures
+let minutes=rest/minute
+let rest=rest-minute*minutes
+let seconds=rest
+
+let moiss=moiss*30
+let jours=jours+moiss
+let jours=jours*24
+let heures=jours+heures
+
+if [ $heures -lt 10 ];
+then
+    typeset heures_display="0${heures}"
+else
+    heures_display=$heures
+fi
+if [ $minutes -lt 10 ];
+then
+    typeset minutes_display="0${minutes}"
+else
+    minutes_display=$minutes
+fi
+if [ $seconds -lt 10 ];
+then
+    typeset seconds_display="0${seconds}"
+else
+    seconds_display=$seconds
+fi
+print "${heures_display}:${minutes_display}:${seconds_display}"
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : change_heure
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : permet d'incrémenter ou de décrémenter l'heure donnée
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = _heure_hh (heure au format H24 - de 00 a 23)
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: change_heure 2345
+#@(#)---------------------------------------------------------------------------
+
+function change_heure
+{
+
+_heure_hh=`echo $1 | cut -c1-2`
+HEURE_MM=`echo $1 | cut -c3-4`
+
+if [ ${_heure_hh} -lt 10 ];
+  then
+      NEW_HEURE_HH=`expr ${_heure_hh} + 1`
+      NEW_HEURE_HH="0"$NEW_HEURE_HH
+   else
+      NEW_HEURE_HH=`expr ${_heure_hh} + 1`
+fi
+
+if [ $NEW_HEURE_HH -ge 24 ];
+
+ then
+
+      NEW_HEURE_HH=`expr ${NEW_HEURE_HH} - 24`
+      NEW_HEURE_HH="0"$NEW_HEURE_HH
+fi
+
+NEW_HEURE=$NEW_HEURE_HH$HEURE_MM
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : lt_blank
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : Suppression des blancs de debut et fin de chaine
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = Chaine passée en parametre
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: NB_JOBSTREAM=$(lt_blank ${NB_JOBSTREAM})
+#@(#)---------------------------------------------------------------------------
+
+function lt_blank
+{
+            echo "$*"|sed 's/^ *//g;s/$ *//g'
+            return 0
+}
+
+
+#@(#)===========================================================================
+#@(#) Fonction  : to_upper
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : Transforme tous les arguments passes ($@) en majuscule
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = Chaine passée en parametre
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: NB_JOBSTREAM=$(to_upper ${NB_JOBSTREAM})
+#@(#)---------------------------------------------------------------------------
+
+function to_upper
+{
+if [ -z "$1" ]; then
+  echo "no value"
+  return
+fi
+
+# transforme tous les arguments passes ($@) en majuscule
+echo "$@" | tr a-z A-Z
+return
+}
+
+#@(#)===========================================================================
+#@(#) Fonction  : to_lower
+#@(#) Auteur    : Jean Philippe BOCQUENET
+#@(#) Descriptif        : Transforme tous les arguments passes ($@) en minuscule
+#@(#)===========================================================================
+#@(#) Paramètre(s) :
+#@(#)           Entree : $1 = Chaine passée en parametre
+#@(#)           Sortie : (fichiers, tables, codes erreur, ...)
+#@(#)---------------------------------------------------------------------------
+#@(#)   Exemple: NB_JOBSTREAM=$(to_lower ${NB_JOBSTREAM})
+#@(#)---------------------------------------------------------------------------
+
+function to_lower
+{
+if [ -z "$1" ]; then
+  echo "no value"
+  return
+fi
+# transforme tous les arguments passes ($@) en minuscule
+echo "$@" | tr A-Z a-z
+
+return
+}

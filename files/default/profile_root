@@ -1,0 +1,44 @@
+if [[ -t 0 ]];then
+REAL_USER=${REAL_USER:-$(who am i | awk '{print $1}')}
+export REAL_USER
+
+if [[ $REAL_USER = "root" ]];then
+#Set the tty type on the below line based on the type of console
+  if [[ $(tty|awk '{print index($0,"vty")+index($0,"lft")}') = 0 ]];then
+    TOPppid=$(ps -ef|grep dtsession|grep -v grep|awk '{print $2}')
+    TOPppid=${TOPppid:-"1"}
+    cnt=$$
+    while [ $cnt -gt 1 ] && [ $cnt -ne $TOPppid ] && [ $REAL_USER = "root" ]
+      do
+      PPID_Name=$(ps -p $cnt -o ppid=,ruser= )
+      cnt=$(echo "$PPID_Name"|awk '{print $1}')
+      REAL_USER=$(echo "$PPID_Name"|awk '{print $2}')
+      done
+    if [[ $cnt = 1 ]]; then
+      exit 1
+    fi
+  fi
+fi
+Dir="/var/log/as_root_logs"
+if [[ ! -d $Dir ]];then
+   mkdir $Dir
+fi
+WHOas="${REAL_USER}.as.${LOGNAME}"
+HISTFILE="$Dir/.hist.${WHOas}"
+if [ ! -f $HISTFILE ]; then
+  printf "\001\001\n\000\000" > $HISTFILE
+  touch ${HISTFILE}_smit.log ${HISTFILE}_smit.script
+  chmod 600 ${HISTFILE} ${HISTFILE}_smit.log ${HISTFILE}_smit.script
+fi
+export HISTFILE
+echo "#\n# Begin $WHOas ($(tty)) on $(date +%m-%d-%Y@%T)"  >> $HISTFILE
+printf "\000\000" >> $HISTFILE
+alias smitty='smitty -l "${HISTFILE}_smit.log" -s "${HISTFILE}_smit.script"'
+alias smit='smit -l "${HISTFILE}_smit.log" -s "${HISTFILE}_smit.script"'
+fi
+ 
+
+export LOG=/log/root
+export PATH=$PATH:/home/root/sh
+export PATH=$PATH:/usr/share/bin
+. /etc/profile 
